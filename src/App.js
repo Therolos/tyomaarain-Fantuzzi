@@ -168,6 +168,16 @@ export default function App() {
     setView("list"); setSel(null);
   };
 
+  const updateWO = async (id, data) => {
+    try {
+      const ref = doc(db, "tyomaaraimet", id);
+      const snap = await getDoc(ref);
+      if (snap.exists()) await setDoc(ref, {...snap.data(), ...data, muokattu: new Date().toISOString()});
+    } catch(e) { console.error(e); }
+    setSel(s => s?.id===id ? {...s, ...data, muokattu: new Date().toISOString()} : s);
+    setView("detail");
+  };
+
   const setKoneStatus = async (kone, sid, note) => {
     const next = {...kstat, [kone]: {status:sid, note, ts:new Date().toISOString()}};
     setKstat(next);
@@ -195,7 +205,8 @@ export default function App() {
   );
 
   if (view==="new")      return <NewForm koneet={koneet} tekijat={tekijat} onSave={addWO} onBack={()=>setView("list")}/>;
-  if (view==="detail" && sel) return <Detail w={sel} onBack={()=>setView("list")} onStatus={s=>setWOStatus(sel.id,s)} onDelete={()=>deleteWO(sel.id)}/>;
+  if (view==="detail" && sel) return <Detail w={sel} onBack={()=>setView("list")} onStatus={s=>setWOStatus(sel.id,s)} onDelete={()=>deleteWO(sel.id)} onEdit={()=>setView("edit")}/>;
+  if (view==="edit" && sel) return <EditForm w={sel} koneet={koneet} tekijat={tekijat} onSave={(data)=>updateWO(sel.id,data)} onBack={()=>setView("detail")}/>;
   if (view==="kstat")    return <KoneStatus koneet={koneet.filter(k=>k!=="Muu kone")} kstat={kstat} onSet={setKoneStatus} onBack={()=>setView("list")}/>;
   if (view==="settings") return <Settings koneet={koneet} tekijat={tekijat} onSave={saveKoneetTekijat} onBack={()=>setView("list")}/>;
 
@@ -392,7 +403,7 @@ function NewForm({koneet, tekijat, onSave, onBack}) {
 }
 
 // ── Detail ────────────────────────────────────────────────────────────────────
-function Detail({w, onBack, onStatus, onDelete}) {
+function Detail({w, onBack, onStatus, onDelete, onEdit}) {
   const [pdf,  setPdf]  = useState(false);
   const [conf, setConf] = useState(false);
   const s   = wos(w.status);
@@ -402,7 +413,7 @@ function Detail({w, onBack, onStatus, onDelete}) {
   return (
     <div style={R.root}>
       <div style={R.header}>
-        <div style={R.htop}><div style={R.logo}>{w.id}</div><Btn onClick={onBack}>← Takaisin</Btn></div>
+        <div style={R.htop}><div style={R.logo}>{w.id}</div><div style={{display:"flex",gap:6}}><Btn onClick={onEdit}>✏ Muokkaa</Btn><Btn onClick={onBack}>← Takaisin</Btn></div></div>
       </div>
       <div style={R.body}>
         <div style={R.card}>
@@ -529,6 +540,112 @@ function KoneStatus({koneet, kstat, onSet, onBack}) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+
+// ── EditForm ──────────────────────────────────────────────────────────────────
+function EditForm({w, koneet, tekijat, onSave, onBack}) {
+  const [kone,       setKone]       = useState(w.kone||koneet[0]||"");
+  const [ttmap,      setTtmap]      = useState(w.tekijaTunnit||{});
+  const [pvm,        setPvm]        = useState(w.pvm||new Date().toISOString().slice(0,10));
+  const [konetunnit, setKonetunnit] = useState(w.konetunnit||"");
+  const [kuvaus,     setKuvaus]     = useState(w.kuvaus||"");
+  const [lisat,      setLisat]      = useState(w.lisatiedot||"");
+  const [status,     setStatus]     = useState(w.status||"avoin");
+  const [saving,     setSaving]     = useState(false);
+
+  const valitut = Object.keys(ttmap);
+  const valid   = kuvaus.trim() && valitut.length>0
+    && valitut.every(t=>Number(ttmap[t])>0)
+    && Number(konetunnit)>0;
+
+  const toggleT = t => setTtmap(m=>{const n={...m}; if(n[t]!==undefined)delete n[t]; else n[t]=n[t]||""; return n;});
+  const setT    = (t,v) => setTtmap(m=>({...m,[t]:v}));
+
+  const handleSave = async () => {
+    setSaving(true);
+    await onSave({kone,tekijaTunnit:ttmap,pvm,konetunnit,kuvaus,lisatiedot:lisat,status});
+  };
+
+  return (
+    <div style={R.root}>
+      <div style={R.header}>
+        <div style={R.htop}>
+          <div style={R.logo}>✏ MUOKKAA {w.id}</div>
+          <Btn onClick={onBack}>← Takaisin</Btn>
+        </div>
+      </div>
+      <div style={R.body}>
+        <Label>KONE / LAITE</Label>
+        <select style={R.input} value={kone} onChange={e=>setKone(e.target.value)}>
+          {koneet.map(k=><option key={k}>{k}</option>)}
+        </select>
+
+        <Label>TEKIJÄT & TYÖTUNNIT *</Label>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:10}}>
+          {tekijat.map(t=>{
+            const on=ttmap[t]!==undefined;
+            return <button key={t} onClick={()=>toggleT(t)}
+              style={{...R.stBtn,borderColor:on?"#d97706":"#e5e7eb",background:on?"#d97706":"transparent",color:on?"#fff":"#6b7280"}}>
+              {on?"✓ ":""}{t}
+            </button>;
+          })}
+        </div>
+        {valitut.length>0&&(
+          <div style={R.tbox}>
+            {valitut.map(t=>(
+              <div key={t} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <span style={{fontSize:13,color:"#374151"}}>👤 {t}</span>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <input style={{...R.input,width:80,marginBottom:0,textAlign:"right"}}
+                    type="number" min="0.5" step="0.5" placeholder="0"
+                    value={ttmap[t]} onChange={e=>setT(t,e.target.value)}/>
+                  <span style={{color:"#9ca3af",fontSize:12}}>h</span>
+                </div>
+              </div>
+            ))}
+            {valitut.length>1&&(
+              <div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #e5e7eb",paddingTop:8,marginTop:4}}>
+                <span style={{fontSize:13,color:"#9ca3af"}}>Yhteensä</span>
+                <span style={{fontWeight:700,color:"#d97706"}}>{valitut.reduce((a,t)=>a+Number(ttmap[t]||0),0)} h</span>
+              </div>
+            )}
+          </div>
+        )}
+        {valitut.length===0&&<Hint>Valitse tekijät ylhäältä</Hint>}
+
+        <Label>KONETUNNIT / MITTARILUKEMA (h) *</Label>
+        <input style={R.input} type="number" min="0" step="1" placeholder="esim. 1250"
+          value={konetunnit} onChange={e=>setKonetunnit(e.target.value)}/>
+
+        <Label>PÄIVÄMÄÄRÄ</Label>
+        <input style={R.input} type="date" value={pvm} onChange={e=>setPvm(e.target.value)}/>
+
+        <Label>MITÄ TEHTY *</Label>
+        <textarea style={{...R.input,height:80,resize:"none"}} placeholder="Kuvaa tehdyt työt..."
+          value={kuvaus} onChange={e=>setKuvaus(e.target.value)}/>
+
+        <Label>LISÄTIEDOT / OSAT</Label>
+        <textarea style={{...R.input,height:60,resize:"none"}} placeholder="Vaihdetut osat, huomiot..."
+          value={lisat} onChange={e=>setLisat(e.target.value)}/>
+
+        <Label>STATUS</Label>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:24}}>
+          {WO_STATUS.map(s=>(
+            <button key={s.id} onClick={()=>setStatus(s.id)}
+              style={{...R.stBtn,borderColor:s.c,background:status===s.id?s.c:"transparent",color:status===s.id?"#fff":s.c}}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        {!valid&&valitut.length>0&&<Hint red>Tarkista tekijöiden tunnit ja mittarilukema</Hint>}
+        <Btn primary full disabled={!valid||saving} onClick={handleSave}>
+          {saving?"⏳ Tallennetaan...":"💾 TALLENNA MUUTOKSET"}
+        </Btn>
       </div>
     </div>
   );
