@@ -142,7 +142,7 @@ export default function App() {
   const [kstat,   setKstat]   = useState({});
   const [sel,     setSel]     = useState(null);
   const [haku,    setHaku]    = useState("");
-  const [filt,    setFilt]    = useState("all");
+  const [filt,    setFilt]    = useState("active");
   const [loading, setLoading] = useState(true);
 
   useEffect(()=>{
@@ -215,7 +215,7 @@ export default function App() {
   };
 
   const filtered=woList
-    .filter(w=>filt==="all"||w.status===filt)
+    .filter(w=>filt==="active"?w.status!=="valmis":filt==="all"||w.status===filt)
     .filter(w=>{
       if(!haku) return true;
       const h=haku.toLowerCase();
@@ -234,7 +234,6 @@ export default function App() {
   if(view==="new")    return <NewForm koneet={koneet} tekijat={tekijat} onSave={addWO} onBack={()=>setView("list")}/>;
   if(view==="detail"&&sel) return <Detail w={sel} onBack={()=>setView("list")} onStatus={s=>setWOStatus(sel.id,s)} onDelete={()=>deleteWO(sel.id)} onEdit={()=>setView("edit")}/>;
   if(view==="edit"&&sel)   return <EditForm w={sel} koneet={koneet} tekijat={tekijat} onSave={data=>updateWO(sel.id,data)} onBack={()=>setView("detail")}/>;
-  if(view==="kstat")  return <KoneStatus koneet={koneet.filter(k=>k!=="Muu kone")} kstat={kstat} onSet={setKoneStatus} onBack={()=>setView("list")}/>;
   if(view==="settings") return <Settings koneet={koneet} tekijat={tekijat} onSave={saveKoneetTekijat} onBack={()=>setView("list")}/>;
 
   return (
@@ -243,19 +242,28 @@ export default function App() {
         <div style={R.htop}>
           <div><div style={R.logo}>⚙ FANTUZZI</div><div style={R.sub}>Työmääräinjärjestelmä</div></div>
           <div style={{display:"flex",gap:6}}>
-            <Btn icon onClick={()=>setView("kstat")}>📊</Btn>
             <Btn icon onClick={()=>setView("settings")}>⚙</Btn>
             <Btn primary onClick={()=>setView("new")}>+ UUSI</Btn>
           </div>
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
-          {WO_STATUS.map(s=>(
-            <div key={s.id} onClick={()=>setFilt(filt===s.id?"all":s.id)}
+          <div onClick={()=>setFilt("active")}
+            style={{...R.chip,borderColor:"#d97706",background:filt==="active"?"#d97706"+"22":"transparent",cursor:"pointer"}}>
+            <span style={{color:"#d97706",fontWeight:700,fontSize:11}}>{woList.filter(w=>w.status!=="valmis").length}</span>
+            <span style={{color:"#999",fontSize:9,marginLeft:4}}>AKTIIVISET</span>
+          </div>
+          {WO_STATUS.filter(s=>s.id!=="valmis").map(s=>(
+            <div key={s.id} onClick={()=>setFilt(filt===s.id?"active":s.id)}
               style={{...R.chip,borderColor:s.c,background:filt===s.id?s.c+"22":"transparent",cursor:"pointer"}}>
               <span style={{color:s.c,fontWeight:700,fontSize:11}}>{woList.filter(w=>w.status===s.id).length}</span>
               <span style={{color:"#999",fontSize:9,marginLeft:4}}>{s.label.toUpperCase()}</span>
             </div>
           ))}
+          <div onClick={()=>setFilt("valmis")}
+            style={{...R.chip,borderColor:"#16a34a",background:filt==="valmis"?"#16a34a"+"22":"transparent",cursor:"pointer"}}>
+            <span style={{color:"#16a34a",fontWeight:700,fontSize:11}}>{woList.filter(w=>w.status==="valmis").length}</span>
+            <span style={{color:"#999",fontSize:9,marginLeft:4}}>📦 ARKISTO</span>
+          </div>
         </div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{fontSize:11,color:"#aaa"}}>{woList.length} kpl · {totalH} h</span>
