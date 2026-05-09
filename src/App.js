@@ -398,7 +398,7 @@ function NewForm({koneet, tekijat, onSave, onBack}) {
   const valitut= Object.keys(ttmap);
   const valid  = kuvaus.trim()&&valitut.length>0
     &&valitut.every(t=>Number(ttmap[t])>0)
-    &&Number(konetunnit)>0
+    &&(status==="avoin"||Number(konetunnit)>0)
     &&(!isMuu||muuNimi.trim());
 
   const toggleT = t=>setTtmap(m=>{const n={...m};if(n[t]!==undefined)delete n[t];else n[t]="";return n;});
@@ -455,7 +455,7 @@ function NewForm({koneet, tekijat, onSave, onBack}) {
         <TekijaValinta tekijat={tekijat} ttmap={ttmap} toggleT={toggleT} setT={setT} pvm={pvm}/>
 
         <Label>KONETUNNIT / MITTARILUKEMA (h) *</Label>
-        <input style={R.input} type="number" min="0" step="1" placeholder="esim. 1250"
+        <input style={R.input} type="number" min="0" step="1" placeholder={status==="avoin"?"esim. 1250 (vapaaehtoinen)":"esim. 1250"}
           value={konetunnit} onChange={e=>setKonetunnit(e.target.value)}/>
 
         <Label>PÄIVÄMÄÄRÄ</Label>
@@ -478,7 +478,7 @@ function NewForm({koneet, tekijat, onSave, onBack}) {
             </button>
           ))}
         </div>
-        {!valid&&valitut.length>0&&<Hint red>Tarkista tekijöiden tunnit ja mittarilukema</Hint>}
+        {!valid&&valitut.length>0&&<Hint red>Tarkista tekijöiden tunnit{status!=="avoin"?" ja mittarilukema":""}</Hint>}
         <Btn primary full disabled={!valid||saving} onClick={handleTallenna}>
           {saving?"⏳ Tallennetaan...":"💾 TALLENNA TYÖMÄÄRÄIN"}
         </Btn>
@@ -502,7 +502,7 @@ function EditForm({w, koneet, tekijat, onSave, onBack}) {
   const valitut=Object.keys(ttmap);
   // Valid: joko lisätään tunnit TAI pelkkä kuvaus/status muutos
   const validTunnit = valitut.length===0 || valitut.every(t=>Number(ttmap[t])>0);
-  const valid = kuvaus.trim() && Number(konetunnit)>0 && validTunnit;
+  const valid = kuvaus.trim() && (status==="avoin"||Number(konetunnit)>0) && validTunnit;
 
   const toggleT = t=>setTtmap(m=>{const n={...m};if(n[t]!==undefined)delete n[t];else n[t]="";return n;});
   const setT    = (t,v)=>setTtmap(m=>({...m,[t]:v}));
@@ -569,7 +569,7 @@ function EditForm({w, koneet, tekijat, onSave, onBack}) {
         <TekijaValinta tekijat={tekijat} ttmap={ttmap} toggleT={toggleT} setT={setT} pvm={pvmUusi}/>
 
         <Label>KONETUNNIT / MITTARILUKEMA (h) *</Label>
-        <input style={R.input} type="number" min="0" step="1" placeholder="esim. 1250"
+        <input style={R.input} type="number" min="0" step="1" placeholder={status==="avoin"?"esim. 1250 (vapaaehtoinen)":"esim. 1250"}
           value={konetunnit} onChange={e=>setKonetunnit(e.target.value)}/>
 
         <Label>MITÄ TEHTY *</Label>
