@@ -143,6 +143,7 @@ export default function App() {
   const [sel,     setSel]     = useState(null);
   const [haku,    setHaku]    = useState("");
   const [filt,    setFilt]    = useState("active");
+  const [prevView, setPrevView] = useState("list");
   const [loading, setLoading] = useState(true);
 
   useEffect(()=>{
@@ -231,6 +232,7 @@ export default function App() {
     </div>
   );
 
+  if(view==="arkisto") return <Arkisto woList={woList.filter(w=>w.status==="valmis")} onSelect={w=>{setSel(w);setView("detail");}} onBack={()=>setView("list")}/>;
   if(view==="new")    return <NewForm koneet={koneet} tekijat={tekijat} onSave={addWO} onBack={()=>setView("list")}/>;
   if(view==="detail"&&sel) return <Detail w={sel} onBack={()=>setView("list")} onStatus={s=>setWOStatus(sel.id,s)} onDelete={()=>deleteWO(sel.id)} onEdit={()=>setView("edit")}/>;
   if(view==="edit"&&sel)   return <EditForm w={sel} koneet={koneet} tekijat={tekijat} onSave={data=>updateWO(sel.id,data)} onBack={()=>setView("detail")}/>;
@@ -243,6 +245,7 @@ export default function App() {
           <div><div style={R.logo}>⚙ FANTUZZI</div><div style={R.sub}>Työmääräinjärjestelmä</div></div>
           <div style={{display:"flex",gap:6}}>
             <Btn icon onClick={()=>setView("settings")}>⚙</Btn>
+            <Btn icon onClick={()=>setView("arkisto")}>📦</Btn>
             <Btn primary onClick={()=>setView("new")}>+ UUSI</Btn>
           </div>
         </div>
@@ -259,11 +262,6 @@ export default function App() {
               <span style={{color:"#999",fontSize:9,marginLeft:4}}>{s.label.toUpperCase()}</span>
             </div>
           ))}
-          <div onClick={()=>setFilt("valmis")}
-            style={{...R.chip,borderColor:"#16a34a",background:filt==="valmis"?"#16a34a"+"22":"transparent",cursor:"pointer"}}>
-            <span style={{color:"#16a34a",fontWeight:700,fontSize:11}}>{woList.filter(w=>w.status==="valmis").length}</span>
-            <span style={{color:"#999",fontSize:9,marginLeft:4}}>📦 ARKISTO</span>
-          </div>
         </div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{fontSize:11,color:"#aaa"}}>{woList.length} kpl · {totalH} h</span>
@@ -698,6 +696,53 @@ function KoneStatus({koneet, kstat, onSet, onBack}) {
                   <Btn primary full onClick={save}>{saved?"✓ TALLENNETTU!":"💾 TALLENNA STATUS"}</Btn>
                 </div>
               )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
+// ── Arkisto ───────────────────────────────────────────────────────────────────
+function Arkisto({woList, onSelect, onBack}) {
+  const [haku, setHaku] = useState("");
+  const filtered = woList
+    .filter(w => {
+      if (!haku) return true;
+      const h = haku.toLowerCase();
+      return [w.kone, w.kuvaus, w.id].some(x => x?.toLowerCase().includes(h));
+    })
+    .sort((a,b) => new Date(b.luotu)-new Date(a.luotu));
+
+  return (
+    <div style={R.root}>
+      <div style={R.header}>
+        <div style={R.htop}>
+          <div><div style={R.logo}>📦 ARKISTO</div><div style={R.sub}>Valmiit työmääräimet</div></div>
+          <Btn onClick={onBack}>← Takaisin</Btn>
+        </div>
+      </div>
+      <div style={R.body}>
+        <input style={R.search} placeholder="🔍  Hae..." value={haku} onChange={e=>setHaku(e.target.value)}/>
+        {filtered.length===0&&<div style={{textAlign:"center",marginTop:60,color:"#bbb"}}>📦<br/>Ei arkistoituja töitä</div>}
+        {filtered.map(w=>{
+          const ts=tekijatListaus(w);
+          return(
+            <div key={w.id} style={{...R.card,borderLeft:"4px solid #16a34a"}} onClick={()=>onSelect(w)}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                <span style={{fontSize:10,color:"#d97706",fontWeight:700,letterSpacing:2}}>{w.id}</span>
+                <span style={{fontSize:11,color:"#16a34a",fontWeight:700}}>✓ Valmis</span>
+              </div>
+              <div style={{fontWeight:700,fontSize:16,color:"#111827",marginBottom:4}}>{w.kone}</div>
+              <div style={{fontSize:14,color:"#6b7280",marginBottom:8,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{w.kuvaus}</div>
+              <div style={{display:"flex",gap:12,fontSize:13,color:"#9ca3af",flexWrap:"wrap"}}>
+                {ts&&<span>👤 {ts}</span>}
+                <span>🔢 {w.konetunnit||"?"}h</span>
+                <span>⏱ {sumH(w)}h</span>
+                <span>📅 {fd(w.pvm)}</span>
+              </div>
             </div>
           );
         })}
