@@ -333,7 +333,7 @@ function Detail({w, onBack, onStatus, onDelete, onEdit}) {
                   <span style={{fontSize:13,fontWeight:700,color:"#374151"}}>👤 {tekija}</span>
                   <span style={{fontWeight:700,color:"#d97706"}}>{sumTekija(rivit)} h yht.</span>
                 </div>
-                {rivit.map((r,i)=>(
+                {rivit.filter(r=>Number(r.h)>0).map((r,i)=>(
                   <div key={i} style={{display:"flex",justifyContent:"space-between",paddingLeft:20,fontSize:12,color:"#6b7280",marginBottom:2}}>
                     <span>📅 {r.pvm?fd(r.pvm):"?"}</span>
                     <span>{r.h} h</span>
@@ -518,7 +518,9 @@ function EditForm({w, koneet, tekijat, onSave, onBack}) {
     // Yhdistetään vanhat + uudet tunnit
     const norm = normalizeTunnit(w.tekijaTunnit||{});
     valitut.forEach(t=>{
-      const uusiRivi={h:Number(ttmap[t]),pvm:pvmUusi};
+      const h=Number(ttmap[t]);
+      if(h<=0) return;
+      const uusiRivi={h,pvm:pvmUusi};
       if(norm[t]) norm[t]=[...norm[t],uusiRivi];
       else norm[t]=[uusiRivi];
     });
@@ -550,7 +552,7 @@ function EditForm({w, koneet, tekijat, onSave, onBack}) {
               {Object.entries(norm).map(([tekija,rivit])=>(
                 <div key={tekija} style={{marginBottom:8}}>
                   <div style={{fontSize:13,fontWeight:700,color:"#374151",marginBottom:4}}>👤 {tekija} — {sumTekija(rivit)} h yht.</div>
-                  {rivit.map((r,i)=>(
+                  {rivit.filter(r=>Number(r.h)>0).map((r,i)=>(
                     <div key={i} style={{display:"flex",justifyContent:"space-between",paddingLeft:20,fontSize:12,color:"#6b7280",marginBottom:2}}>
                       <span>📅 {r.pvm?fd(r.pvm):"?"}</span><span>{r.h} h</span>
                     </div>
