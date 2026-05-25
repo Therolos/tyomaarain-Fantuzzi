@@ -216,7 +216,10 @@ export default function App() {
   };
 
   const filtered=woList
-    .filter(w=>filt==="active"?w.status!=="valmis":filt==="all"||w.status===filt)
+    .filter(w=>{
+      if(haku) return true; // haku hakee kaikista
+      return filt==="active"?w.status!=="valmis":filt==="all"||w.status===filt;
+    })
     .filter(w=>{
       if(!haku) return true;
       const h=haku.toLowerCase();
