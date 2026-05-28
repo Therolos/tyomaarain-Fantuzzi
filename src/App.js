@@ -204,6 +204,15 @@ export default function App() {
     setSel(s=>s?.id===id?{...s,status}:s);
   };
 
+  const setLappuTehty = async (id, val) => {
+    try {
+      const ref=doc(db,"tyomaaraimet",id);
+      const snap=await getDoc(ref);
+      if(snap.exists()) await setDoc(ref,{...snap.data(),lappuTehty:val});
+    } catch(e){console.error(e);}
+    setSel(s=>s?.id===id?{...s,lappuTehty:val}:s);
+  };
+
   const deleteWO = async id => {
     try { await deleteDoc(doc(db,"tyomaaraimet",id)); } catch(e){console.error(e);}
     setView("list"); setSel(null);
@@ -218,7 +227,7 @@ export default function App() {
   const filtered=woList
     .filter(w=>{
       if(haku) return true; // haku hakee kaikista
-      return filt==="active"?w.status!=="valmis":filt==="all"||w.status===filt;
+      return filt==="active"?(w.status!=="valmis"||(w.status==="valmis"&&!w.lappuTehty)):filt==="all"||w.status===filt;
     })
     .filter(w=>{
       if(!haku) return true;
@@ -235,9 +244,9 @@ export default function App() {
     </div>
   );
 
-  if(view==="arkisto") return <Arkisto woList={woList.filter(w=>w.status==="valmis")} onSelect={w=>{setSel(w);setView("detail");}} onBack={()=>setView("list")}/>;
+  if(view==="arkisto") return <Arkisto woList={woList.filter(w=>w.status==="valmis"&&w.lappuTehty)} onSelect={w=>{setSel(w);setView("detail");}} onBack={()=>setView("list")}/>;
   if(view==="new")    return <NewForm koneet={koneet} tekijat={tekijat} onSave={addWO} onBack={()=>setView("list")}/>;
-  if(view==="detail"&&sel) return <Detail w={sel} onBack={()=>setView("list")} onStatus={s=>setWOStatus(sel.id,s)} onDelete={()=>deleteWO(sel.id)} onEdit={()=>setView("edit")}/>;
+  if(view==="detail"&&sel) return <Detail w={sel} onBack={()=>setView("list")} onStatus={s=>setWOStatus(sel.id,s)} onDelete={()=>deleteWO(sel.id)} onEdit={()=>setView("edit")} onLappu={v=>setLappuTehty(sel.id,v)}/>;
   if(view==="edit"&&sel)   return <EditForm w={sel} koneet={koneet} tekijat={tekijat} onSave={data=>updateWO(sel.id,data)} onBack={()=>setView("detail")}/>;
   if(view==="settings") return <Settings koneet={koneet} tekijat={tekijat} onSave={saveKoneetTekijat} onBack={()=>setView("list")}/>;
 
@@ -278,10 +287,10 @@ export default function App() {
           const s=wos(w.status);
           const ts=tekijatListaus(w);
           return(
-            <div key={w.id} style={R.card} onClick={()=>{setSel(w);setView("detail");}}>
+            <div key={w.id} style={{...R.card,borderLeft:w.status==="valmis"&&!w.lappuTehty?"4px solid #f59e0b":undefined}} onClick={()=>{setSel(w);setView("detail");}}>
               <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
                 <span style={{fontSize:10,color:"#d97706",fontWeight:700,letterSpacing:2}}>{w.id}</span>
-                <span style={{...R.badge,background:s.c+"18",color:s.c,border:`1px solid ${s.c}44`}}>{s.label}</span>
+                <span style={{...R.badge,background:s.c+"18",color:s.c,border:`1px solid ${s.c}44`}}>{w.status==="valmis"&&!w.lappuTehty?"📝 Lappu tekemättä":s.label}</span>
               </div>
               <div style={{fontWeight:700,fontSize:16,color:"#111827",marginBottom:4}}>{w.kone}</div>
               <div style={{fontSize:14,color:"#6b7280",marginBottom:8,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{w.kuvaus}</div>
@@ -300,7 +309,7 @@ export default function App() {
 }
 
 // ── Detail ────────────────────────────────────────────────────────────────────
-function Detail({w, onBack, onStatus, onDelete, onEdit}) {
+function Detail({w, onBack, onStatus, onDelete, onEdit, onLappu}) {
   const [pdf,  setPdf]  = useState(false);
   const [conf, setConf] = useState(false);
   const s    = wos(w.status);
@@ -372,6 +381,17 @@ function Detail({w, onBack, onStatus, onDelete, onEdit}) {
           <button style={R.pdfBtn} onClick={async()=>{setPdf(true);try{await doPDF(w);}finally{setPdf(false);}}} disabled={pdf}>
             {pdf?"⏳ Luodaan...":"📄 VIE PDF"}
           </button>
+          <button style={{...R.pdfBtn,borderColor:"#d97706",color:"#d97706",marginBottom:8}} onClick={onEdit}>✏ MUOKKAA</button>
+          {w.status==="valmis"&&(
+            <button
+              style={{...R.pdfBtn,
+                borderColor:w.lappuTehty?"#16a34a":"#f59e0b",
+                color:w.lappuTehty?"#16a34a":"#f59e0b",
+                marginBottom:8}}
+              onClick={()=>onLappu(!w.lappuTehty)}>
+              {w.lappuTehty?"✅ PAPERINEN LAPPU TEHTY":"📝 MERKITSE LAPPU TEHDYKSI"}
+            </button>
+          )}
 
           {!conf
             ?<button style={R.delBtn} onClick={()=>setConf(true)}>🗑 Poista työmääräin</button>
