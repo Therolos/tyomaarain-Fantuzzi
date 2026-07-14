@@ -425,7 +425,11 @@ function NewForm({koneet, tekijat, woList, onSave, onBack}) {
   const isMuu  = kone==="Muu kone";
   const kNimi  = isMuu?muuNimi.trim():kone;
   const kuvausSugg = [...new Set((woList||[]).map(w=>w.kuvaus).filter(Boolean))];
-  const lisatSugg  = [...new Set((woList||[]).map(w=>w.lisatiedot).filter(Boolean))];
+  const lisatSugg  = [...new Set(
+    (woList||[])
+      .flatMap(w=>(w.lisatiedot||"").split(/[\s,;]+/))
+      .filter(s=>s.length>=3)
+  )];
   const valitut= Object.keys(ttmap);
   const valid  = kuvaus.trim()
     &&(status==="avoin"||(valitut.length>0&&valitut.every(t=>Number(ttmap[t])>0)))
@@ -535,7 +539,11 @@ function EditForm({w, koneet, tekijat, woList, onSave, onBack}) {
 
   const valitut=Object.keys(ttmap);
   const kuvausSugg = [...new Set((woList||[]).map(w=>w.kuvaus).filter(Boolean))];
-  const lisatSugg  = [...new Set((woList||[]).map(w=>w.lisatiedot).filter(Boolean))];
+  const lisatSugg  = [...new Set(
+    (woList||[])
+      .flatMap(w=>(w.lisatiedot||"").split(/[\s,;]+/))
+      .filter(s=>s.length>=3)
+  )];
   // Valid: joko lisätään tunnit TAI pelkkä kuvaus/status muutos
   const validTunnit = valitut.length===0 || valitut.every(t=>Number(ttmap[t])>0);
   const valid = kuvaus.trim() && (status==="avoin"||Number(konetunnit)>0) && (status==="avoin"||validTunnit);
@@ -864,11 +872,12 @@ function AutoField({style, placeholder, value, onChange, suggestions, rows}) {
   const handleChange = e => {
     const val = e.target.value;
     onChange(val);
-    if (val.length >= 2) {
-      const lower = val.toLowerCase();
+    const lastWord = val.split(/\s+/).pop();
+    if (lastWord.length >= 2) {
+      const lower = lastWord.toLowerCase();
       const matches = [...new Set(suggestions.filter(s =>
-        s.toLowerCase().includes(lower) && s !== val
-      ))].slice(0, 5);
+        s.toLowerCase().startsWith(lower) && s.toLowerCase() !== lower
+      ))].slice(0, 6);
       setFiltered(matches);
       setShow(matches.length > 0);
     } else {
@@ -877,7 +886,11 @@ function AutoField({style, placeholder, value, onChange, suggestions, rows}) {
   };
 
   const select = s => {
-    onChange(s);
+    // Lisää sana nykyisen tekstin loppuun välilyönnillä erotettuna
+    const current = value.trim();
+    const words = current.split(/\s+/);
+    words[words.length-1] = s; // korvaa viimeinen sana (jota kirjoitetaan)
+    onChange(words.join(" ") + " ");
     setShow(false);
   };
 
