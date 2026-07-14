@@ -245,9 +245,9 @@ export default function App() {
   );
 
   if(view==="arkisto") return <Arkisto woList={woList.filter(w=>w.status==="valmis"&&w.lappuTehty)} onSelect={w=>{setSel(w);setView("detail");}} onBack={()=>setView("list")}/>;
-  if(view==="new")    return <NewForm koneet={koneet} tekijat={tekijat} onSave={addWO} onBack={()=>setView("list")}/>;
+  if(view==="new")    return <NewForm koneet={koneet} tekijat={tekijat} woList={woList} onSave={addWO} onBack={()=>setView("list")}/>;
   if(view==="detail"&&sel) return <Detail w={sel} onBack={()=>setView("list")} onStatus={s=>setWOStatus(sel.id,s)} onDelete={()=>deleteWO(sel.id)} onEdit={()=>setView("edit")} onLappu={v=>setLappuTehty(sel.id,v)}/>;
-  if(view==="edit"&&sel)   return <EditForm w={sel} koneet={koneet} tekijat={tekijat} onSave={data=>updateWO(sel.id,data)} onBack={()=>setView("detail")}/>;
+  if(view==="edit"&&sel)   return <EditForm w={sel} koneet={koneet} tekijat={tekijat} woList={woList} onSave={data=>updateWO(sel.id,data)} onBack={()=>setView("detail")}/>;
   if(view==="settings") return <Settings koneet={koneet} tekijat={tekijat} onSave={saveKoneetTekijat} onBack={()=>setView("list")}/>;
 
   return (
@@ -409,7 +409,7 @@ function Detail({w, onBack, onStatus, onDelete, onEdit, onLappu}) {
 }
 
 // ── NewForm ───────────────────────────────────────────────────────────────────
-function NewForm({koneet, tekijat, onSave, onBack}) {
+function NewForm({koneet, tekijat, woList, onSave, onBack}) {
   const today=new Date().toISOString().slice(0,10);
   const [kone,       setKone]       = useState(koneet[0]||"");
   const [muuNimi,    setMuuNimi]    = useState("");
@@ -424,6 +424,8 @@ function NewForm({koneet, tekijat, onSave, onBack}) {
 
   const isMuu  = kone==="Muu kone";
   const kNimi  = isMuu?muuNimi.trim():kone;
+  const kuvausSugg = [...new Set((woList||[]).map(w=>w.kuvaus).filter(Boolean))];
+  const lisatSugg  = [...new Set((woList||[]).map(w=>w.lisatiedot).filter(Boolean))];
   const valitut= Object.keys(ttmap);
   const valid  = kuvaus.trim()
     &&(status==="avoin"||(valitut.length>0&&valitut.every(t=>Number(ttmap[t])>0)))
@@ -491,12 +493,14 @@ function NewForm({koneet, tekijat, onSave, onBack}) {
         <input style={R.input} type="date" value={pvm} onChange={e=>setPvm(e.target.value)}/>
 
         <Label>{status==="avoin"?"HUOLLON SYY / TEHTÄVÄ *":"MITÄ TEHTY *"}</Label>
-        <textarea style={{...R.input,height:80,resize:"none"}} placeholder={status==="avoin"?"Kuvaa tuleva huolto / vika...":"Kuvaa tehdyt työt..."}
-          value={kuvaus} onChange={e=>setKuvaus(e.target.value)}/>
+        <AutoField style={{...R.input,height:80,resize:"none"}} rows
+          placeholder={status==="avoin"?"Kuvaa tuleva huolto / vika...":"Kuvaa tehdyt työt..."}
+          value={kuvaus} onChange={setKuvaus} suggestions={kuvausSugg}/>
 
         <Label>LISÄTIEDOT / OSAT</Label>
-        <textarea style={{...R.input,height:60,resize:"none"}} placeholder="Vaihdetut osat, huomiot..."
-          value={lisat} onChange={e=>setLisat(e.target.value)}/>
+        <AutoField style={{...R.input,height:60,resize:"none"}} rows
+          placeholder="Vaihdetut osat, huomiot..."
+          value={lisat} onChange={setLisat} suggestions={lisatSugg}/>
 
         <Label>STATUS</Label>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:24}}>
@@ -517,7 +521,7 @@ function NewForm({koneet, tekijat, onSave, onBack}) {
 }
 
 // ── EditForm — lisää tunnit olemassaolevaan TM:ään ────────────────────────────
-function EditForm({w, koneet, tekijat, onSave, onBack}) {
+function EditForm({w, koneet, tekijat, woList, onSave, onBack}) {
   const today=new Date().toISOString().slice(0,10);
   // Uudet tunnit jotka lisätään
   const [ttmap,      setTtmap]      = useState({});
@@ -530,6 +534,8 @@ function EditForm({w, koneet, tekijat, onSave, onBack}) {
   const [editNorm,   setEditNorm]   = useState(normalizeTunnit(w.tekijaTunnit||{}));
 
   const valitut=Object.keys(ttmap);
+  const kuvausSugg = [...new Set((woList||[]).map(w=>w.kuvaus).filter(Boolean))];
+  const lisatSugg  = [...new Set((woList||[]).map(w=>w.lisatiedot).filter(Boolean))];
   // Valid: joko lisätään tunnit TAI pelkkä kuvaus/status muutos
   const validTunnit = valitut.length===0 || valitut.every(t=>Number(ttmap[t])>0);
   const valid = kuvaus.trim() && (status==="avoin"||Number(konetunnit)>0) && (status==="avoin"||validTunnit);
@@ -845,6 +851,73 @@ function Settings({koneet, tekijat, onSave, onBack}) {
           <Btn primary full onClick={save}>{ok?"✓ TALLENNETTU!":"💾 TALLENNA ASETUKSET"}</Btn>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+// ── Autocomplete ──────────────────────────────────────────────────────────────
+function AutoField({style, placeholder, value, onChange, suggestions, rows}) {
+  const [show, setShow] = useState(false);
+  const [filtered, setFiltered] = useState([]);
+
+  const handleChange = e => {
+    const val = e.target.value;
+    onChange(val);
+    if (val.length >= 2) {
+      const lower = val.toLowerCase();
+      const matches = [...new Set(suggestions.filter(s =>
+        s.toLowerCase().includes(lower) && s !== val
+      ))].slice(0, 5);
+      setFiltered(matches);
+      setShow(matches.length > 0);
+    } else {
+      setShow(false);
+    }
+  };
+
+  const select = s => {
+    onChange(s);
+    setShow(false);
+  };
+
+  if (rows) return (
+    <div style={{position:"relative"}}>
+      <textarea style={style} placeholder={placeholder} value={value}
+        onChange={handleChange} onBlur={()=>setTimeout(()=>setShow(false),150)}
+        onFocus={()=>value.length>=2&&handleChange({target:{value}})}/>
+      {show&&(
+        <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",
+          border:"1px solid #e5e7eb",borderRadius:6,zIndex:100,boxShadow:"0 4px 12px #00000015"}}>
+          {filtered.map((s,i)=>(
+            <div key={i} onClick={()=>select(s)}
+              style={{padding:"10px 14px",fontSize:13,color:"#374151",cursor:"pointer",
+                borderBottom:i<filtered.length-1?"1px solid #f3f4f6":"none"}}>
+              {s}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div style={{position:"relative"}}>
+      <input style={style} placeholder={placeholder} value={value}
+        onChange={handleChange} onBlur={()=>setTimeout(()=>setShow(false),150)}
+        onFocus={()=>value.length>=2&&handleChange({target:{value}})}/>
+      {show&&(
+        <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",
+          border:"1px solid #e5e7eb",borderRadius:6,zIndex:100,boxShadow:"0 4px 12px #00000015"}}>
+          {filtered.map((s,i)=>(
+            <div key={i} onClick={()=>select(s)}
+              style={{padding:"10px 14px",fontSize:13,color:"#374151",cursor:"pointer",
+                borderBottom:i<filtered.length-1?"1px solid #f3f4f6":"none"}}>
+              {s}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
