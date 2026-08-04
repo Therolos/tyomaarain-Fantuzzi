@@ -639,6 +639,7 @@ function EditForm({w, koneet, tekijat, woList, onSave, onBack}) {
         <input style={R.input} type="date" value={pvmUusi} onChange={e=>setPvmUusi(e.target.value)}/>
 
         <TekijaValinta tekijat={tekijat} ttmap={ttmap} toggleT={toggleT} setT={setT} pvm={pvmUusi}/>
+        {valitut.length>0&&<PaivanTunnit tekijat={valitut} pvm={pvmUusi} woList={woList}/>}
 
         <Label>KONETUNNIT / MITTARILUKEMA (h) *</Label>
         <input style={R.input} type="number" min="0" step="1" placeholder={status==="avoin"?"esim. 1250 (vapaaehtoinen)":"esim. 1250"}
