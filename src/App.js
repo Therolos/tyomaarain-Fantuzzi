@@ -489,6 +489,8 @@ function NewForm({koneet, tekijat, woList, onSave, onBack}) {
         <Label>TEKIJÄT & TYÖTUNNIT {status==="avoin"?"(vapaaehtoinen)":"*"}</Label>
         <TekijaValinta tekijat={tekijat} ttmap={ttmap} toggleT={toggleT} setT={setT} pvm={pvm}/>
 
+        {valitut.length>0&&<PaivanTunnit tekijat={valitut} pvm={pvm} woList={woList}/>}
+
         <Label>KONETUNNIT / MITTARILUKEMA (h) *</Label>
         <input style={R.input} type="number" min="0" step="1" placeholder={status==="avoin"?"esim. 1250 (vapaaehtoinen)":"esim. 1250"}
           value={konetunnit} onChange={e=>setKonetunnit(e.target.value)}/>
@@ -863,6 +865,45 @@ function Settings({koneet, tekijat, onSave, onBack}) {
   );
 }
 
+
+
+// ── PaivanTunnit ──────────────────────────────────────────────────────────────
+function PaivanTunnit({tekijat, pvm, woList}) {
+  const tunnit = {};
+  tekijat.forEach(tekija => {
+    let yht = 0;
+    (woList||[]).forEach(w => {
+      if (!w.tekijaTunnit) return;
+      const norm = w.tekijaTunnit[tekija];
+      if (!norm) return;
+      const rivit = Array.isArray(norm) ? norm : [{h:Number(norm), pvm:w.pvm}];
+      rivit.forEach(r => { if (r.pvm === pvm) yht += Number(r.h||0); });
+    });
+    tunnit[tekija] = yht;
+  });
+
+  const total = Object.values(tunnit).reduce((a,v)=>a+v,0);
+
+  return (
+    <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"10px 14px",marginBottom:8}}>
+      <div style={{fontSize:10,color:"#92400e",letterSpacing:1.5,fontFamily:"monospace",marginBottom:6}}>
+        TUNNIT {pvm ? new Date(pvm).toLocaleDateString("fi-FI",{day:"2-digit",month:"2-digit",year:"numeric"}) : ""}
+      </div>
+      {tekijat.map(t=>(
+        <div key={t} style={{display:"flex",justifyContent:"space-between",fontSize:13,color:"#374151",marginBottom:4}}>
+          <span>👤 {t}</span>
+          <span style={{fontWeight:700,color:tunnit[t]>0?"#d97706":"#9ca3af"}}>{tunnit[t]} h</span>
+        </div>
+      ))}
+      {tekijat.length>1&&(
+        <div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #fde68a",paddingTop:6,marginTop:4}}>
+          <span style={{fontSize:12,color:"#92400e"}}>Yhteensä</span>
+          <span style={{fontWeight:700,color:"#d97706"}}>{total} h</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Autocomplete ──────────────────────────────────────────────────────────────
 function AutoField({style, placeholder, value, onChange, suggestions, rows}) {
