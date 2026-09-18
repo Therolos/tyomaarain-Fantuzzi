@@ -956,8 +956,27 @@ function partCodeSimilarity(a, b) {
   const x = normalizePartCode(a), y = normalizePartCode(b);
   if (!x || !y) return 0;
   if (x === y) return 1;
+
+  // OCR voi lisätä/poistaa yhden merkin, esim. 344574683 -> 34457469.
+  if (Math.abs(x.length - y.length) === 1) {
+    const longer = x.length > y.length ? x : y;
+    const shorter = x.length > y.length ? y : x;
+    let i = 0, j = 0, edits = 0;
+    while (i < longer.length && j < shorter.length) {
+      if (longer[i] !== shorter[j]) {
+        if (++edits > 1) break;
+        i++;
+      } else {
+        i++; j++;
+      }
+    }
+    if (i < longer.length) edits++;
+    if (edits <= 1) return 0.94;
+  }
+
   if (x.includes(y) || y.includes(x)) return 0.92;
-  // Small OCR mistakes: allow one differing character for typical part numbers.
+
+  // One wrong character.
   if (x.length === y.length) {
     let diff = 0;
     for (let i = 0; i < x.length; i++) if (x[i] !== y[i] && ++diff > 1) return 0;
@@ -1004,8 +1023,19 @@ function AutoField({style, placeholder, value, onChange, suggestions, rows, show
   const handleScan = scanned => {
     const raw = String(scanned || "").trim();
     const candidates = raw.split(/[\n,;|]+/).map(x => x.trim()).filter(Boolean);
-    const usable = candidates.find(x => /^P\s*[0-9OILSB]{5,12}$/i.test(x.replace(/[ -]/g, ""))) || candidates[0] || "";
-    if (!usable) { setScanResult({value:"", match:null}); return; }
+
+    // Hyväksytään vain oikean näköinen osanumero:
+    // P + 5–12 merkkiä tai 7–12 numeroinen koodi.
+    // Älä koskaan ota OCR:n ensimmäistä satunnaista merkkijonoa.
+    const usable = candidates.find(x => {
+      const compact = x.replace(/[ -]/g, "");
+      return /^P[0-9OILSB]{5,12}$/i.test(compact) || /^\d{7,12}$/.test(compact);
+    }) || "";
+
+    if (!usable) {
+      setScanResult(null);
+      return;
+    }
 
     const normalized = normalizePartCode(usable).replace(/O/g,"0").replace(/I/g,"1").replace(/L/g,"1").replace(/S/g,"5").replace(/B/g,"8");
     let best = null, bestScore = 0;
