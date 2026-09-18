@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { collection, doc, onSnapshot, setDoc, deleteDoc, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -431,9 +431,10 @@ function NewForm({koneet, tekijat, woList, onSave, onBack}) {
       .filter(s=>s.length>=3)
   )];
   const valitut= Object.keys(ttmap);
+  const requiresKoneTunnit = kone !== "Halli";
   const valid  = kuvaus.trim()
     &&(status==="avoin"||(valitut.length>0&&valitut.every(t=>Number(ttmap[t])>0)))
-    &&(status==="avoin"||Number(konetunnit)>0)
+    &&(status==="avoin"||!requiresKoneTunnit||Number(konetunnit)>0)
     &&(!isMuu||muuNimi.trim());
 
   const toggleT = t=>setTtmap(m=>{const n={...m};if(n[t]!==undefined)delete n[t];else n[t]="";return n;});
@@ -489,8 +490,8 @@ function NewForm({koneet, tekijat, woList, onSave, onBack}) {
 
         {valitut.length>0&&<PaivanTunnit tekijat={valitut} pvm={pvm} woList={woList}/>}
 
-        <Label>KONETUNNIT / MITTARILUKEMA (h) *</Label>
-        <input style={R.input} type="number" min="0" step="1" placeholder={status==="avoin"?"esim. 1250 (vapaaehtoinen)":"esim. 1250"}
+        <Label>KONETUNNIT / MITTARILUKEMA (h) {kone==="Halli" ? "(ei vaadita hallille)" : "*"}</Label>
+        <input style={R.input} type="number" min="0" step="1" placeholder={kone==="Halli"?"ei vaadita hallille":(status==="avoin"?"esim. 1250 (vapaaehtoinen)":"esim. 1250")}
           value={konetunnit} onChange={e=>setKonetunnit(e.target.value)}/>
 
         <Label>PÄIVÄMÄÄRÄ</Label>
@@ -502,7 +503,7 @@ function NewForm({koneet, tekijat, woList, onSave, onBack}) {
           value={kuvaus} onChange={setKuvaus} suggestions={kuvausSugg}/>
 
         <Label>LISÄTIEDOT / OSAT</Label>
-        <AutoField style={{...R.input,height:60,resize:"none"}} rows
+        <AutoField style={{...R.input,height:60,resize:"none"}} rows showScan
           placeholder="Vaihdetut osat, huomiot..."
           value={lisat} onChange={setLisat} suggestions={lisatSugg}/>
 
@@ -546,7 +547,8 @@ function EditForm({w, koneet, tekijat, woList, onSave, onBack}) {
   )];
   // Valid: joko lisätään tunnit TAI pelkkä kuvaus/status muutos
   const validTunnit = valitut.length===0 || valitut.every(t=>Number(ttmap[t])>0);
-  const valid = kuvaus.trim() && (status==="avoin"||Number(konetunnit)>0) && (status==="avoin"||validTunnit);
+  const requiresKoneTunnit = w.kone !== "Halli";
+  const valid = kuvaus.trim() && (status==="avoin"||!requiresKoneTunnit||Number(konetunnit)>0) && (status==="avoin"||validTunnit);
 
   const toggleT = t=>setTtmap(m=>{const n={...m};if(n[t]!==undefined)delete n[t];else n[t]="";return n;});
   const setT    = (t,v)=>setTtmap(m=>({...m,[t]:v}));
@@ -639,8 +641,8 @@ function EditForm({w, koneet, tekijat, woList, onSave, onBack}) {
         <TekijaValinta tekijat={tekijat} ttmap={ttmap} toggleT={toggleT} setT={setT} pvm={pvmUusi}/>
         {valitut.length>0&&<PaivanTunnit tekijat={valitut} pvm={pvmUusi} woList={woList}/>}
 
-        <Label>KONETUNNIT / MITTARILUKEMA (h) *</Label>
-        <input style={R.input} type="number" min="0" step="1" placeholder={status==="avoin"?"esim. 1250 (vapaaehtoinen)":"esim. 1250"}
+        <Label>KONETUNNIT / MITTARILUKEMA (h) {w.kone==="Halli" ? "(ei vaadita hallille)" : "*"}</Label>
+        <input style={R.input} type="number" min="0" step="1" placeholder={w.kone==="Halli"?"ei vaadita hallille":(status==="avoin"?"esim. 1250 (vapaaehtoinen)":"esim. 1250")}
           value={konetunnit} onChange={e=>setKonetunnit(e.target.value)}/>
 
         <Label>{status==="avoin"?"HUOLLON SYY / TEHTÄVÄ *":"MITÄ TEHTY *"}</Label>
@@ -946,9 +948,10 @@ function PaivanTunnit({tekijat, pvm, woList}) {
 }
 
 // ── Autocomplete ──────────────────────────────────────────────────────────────
-function AutoField({style, placeholder, value, onChange, suggestions, rows}) {
+function AutoField({style, placeholder, value, onChange, suggestions, rows, showScan}) {
   const [show, setShow] = useState(false);
   const [filtered, setFiltered] = useState([]);
+  const [scanning, setScanning] = useState(false);
 
   const handleChange = e => {
     const val = e.target.value;
@@ -977,9 +980,28 @@ function AutoField({style, placeholder, value, onChange, suggestions, rows}) {
 
   if (rows) return (
     <div style={{position:"relative"}}>
-      <textarea style={style} placeholder={placeholder} value={value}
-        onChange={handleChange} onBlur={()=>setTimeout(()=>setShow(false),150)}
-        onFocus={()=>value.length>=2&&handleChange({target:{value}})}/>
+      <div style={{position:"relative"}}>
+        <textarea style={{...style,paddingRight: showScan?"44px":style.paddingRight}} placeholder={placeholder} value={value}
+          onChange={handleChange} onBlur={()=>setTimeout(()=>setShow(false),150)}
+          onFocus={()=>value.length>=2&&handleChange({target:{value}})}/>
+        {showScan&&(
+          <button type="button" onClick={()=>setScanning(true)}
+            style={{position:"absolute",right:8,bottom:8,background:"#d97706",border:"none",
+              borderRadius:6,padding:"6px 8px",cursor:"pointer",fontSize:16}}>
+            📷
+          </button>
+        )}
+      </div>
+      {scanning&&<BarcodeScanner onScan={v=>{
+  // Siivoa skannattu koodi
+  let cleaned = v;
+  // Donaldson: P164592-000-710 → P164592
+  if (/^P\d+-.+/.test(v)) cleaned = v.split("-")[0];
+  // Poista turhat suffixit ja whitespace
+  cleaned = cleaned.trim();
+  onChange((value?value+" ":"")+cleaned+" ");
+  setScanning(false);
+}} onClose={()=>setScanning(false)}/>}
       {show&&(
         <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",
           border:"1px solid #e5e7eb",borderRadius:6,zIndex:100,boxShadow:"0 4px 12px #00000015"}}>
@@ -1041,6 +1063,84 @@ function groupKoneet(koneet) {
     return a.localeCompare(b);
   });
   return sorted.map(r => ({ryhma: r, koneet: groups[r]}));
+}
+
+
+// ── BarcodeScanner ────────────────────────────────────────────────────────────
+function BarcodeScanner({onScan, onClose}) {
+  const videoRef = React.useRef(null);
+  const [error, setError] = useState(null);
+  const [scanning, setScanning] = useState(true);
+
+  React.useEffect(() => {
+    let stream = null;
+    let animFrame = null;
+    let barcodeDetector = null;
+
+    const start = async () => {
+      try {
+        // Check if BarcodeDetector is available
+        if (!("BarcodeDetector" in window)) {
+          setError("Selaimesi ei tue viivakoodiskannausta. Kokeile Chrome tai Edge.");
+          return;
+        }
+        barcodeDetector = new window.BarcodeDetector({
+          formats: ["code_128","code_39","ean_13","ean_8","qr_code","data_matrix","upc_a","upc_e","itf"]
+        });
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+          detectLoop();
+        }
+      } catch(e) {
+        setError("Kameran käyttö epäonnistui: " + e.message);
+      }
+    };
+
+    const detectLoop = async () => {
+      if (!videoRef.current || !scanning) return;
+      try {
+        const codes = await barcodeDetector.detect(videoRef.current);
+        if (codes.length > 0) {
+          const val = codes[0].rawValue;
+          if (stream) stream.getTracks().forEach(t => t.stop());
+          onScan(val);
+          return;
+        }
+      } catch {}
+      animFrame = requestAnimationFrame(detectLoop);
+    };
+
+    start();
+    return () => {
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      if (animFrame) cancelAnimationFrame(animFrame);
+    };
+  }, []);
+
+  return (
+    <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#000",zIndex:1000,display:"flex",flexDirection:"column"}}>
+      <div style={{padding:"16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{color:"#fff",fontFamily:"'Courier New',monospace",fontWeight:700}}>📷 SKANNAA VIIVAKOODI</div>
+        <button onClick={onClose} style={{background:"#333",border:"none",color:"#fff",borderRadius:6,padding:"8px 14px",fontSize:13,cursor:"pointer"}}>✕ Sulje</button>
+      </div>
+      {error ? (
+        <div style={{color:"#ef4444",padding:24,textAlign:"center",fontFamily:"'Courier New',monospace",fontSize:13}}>{error}</div>
+      ) : (
+        <div style={{flex:1,position:"relative"}}>
+          <video ref={videoRef} style={{width:"100%",height:"100%",objectFit:"cover"}} playsInline muted/>
+          {/* Kohdistusviiva */}
+          <div style={{position:"absolute",top:"50%",left:"10%",right:"10%",height:2,background:"#d97706",transform:"translateY(-50%)",boxShadow:"0 0 8px #d97706"}}/>
+          <div style={{position:"absolute",bottom:40,left:0,right:0,textAlign:"center",color:"#fff",fontSize:13,fontFamily:"'Courier New',monospace"}}>
+            Kohdista viivakoodi oranssin viivan kohdalle
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Small components ──────────────────────────────────────────────────────────
