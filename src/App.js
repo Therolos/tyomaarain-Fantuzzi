@@ -1027,10 +1027,21 @@ function AutoField({style, placeholder, value, onChange, suggestions, rows, show
     // Hyväksytään vain oikean näköinen osanumero:
     // P + 5–12 merkkiä tai 7–12 numeroinen koodi.
     // Älä koskaan ota OCR:n ensimmäistä satunnaista merkkijonoa.
-    const usable = candidates.find(x => {
-      const compact = x.replace(/[ -]/g, "");
-      return /^P[0-9OILSB]{5,12}$/i.test(compact) || /^\d{7,12}$/.test(compact);
-    }) || "";
+    // Hyväksy myös tarrassa näkyvät muodot kuten P164592-000-710.
+    // Varsinaiseksi osanumeroksi poimitaan P164592, jotta autocomplete
+    // voi löytää olemassa olevan osanumeron.
+    const pMatch = candidates.map(x => {
+      const compact = x.replace(/[ _-]/g, "");
+      const m = compact.match(/P([0-9OILSB]{5,12})(?:000|0{3})?[0-9OILSB]*$/i);
+      return m ? `P${m[1]}` : null;
+    }).find(Boolean);
+
+    const numericMatch = candidates.map(x => {
+      const compact = x.replace(/[ _-]/g, "");
+      return /^\d{7,12}$/.test(compact) ? compact : null;
+    }).find(Boolean);
+
+    const usable = pMatch || numericMatch || "";
 
     if (!usable) {
       setScanResult(null);
