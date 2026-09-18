@@ -1101,7 +1101,7 @@ function BarcodeScanner({onScan, onClose}) {
     const start = async () => {
       try {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error("Kameraa ei voi käyttää tässä selaimessa.");
-        if ("BarcodeDetector" in window) {
+        if (scanMode === "barcode" && "BarcodeDetector" in window) {
           try { detector = new window.BarcodeDetector({formats:["code_128","code_39","ean_13","ean_8","qr_code","data_matrix","upc_a","upc_e","itf"]}); } catch {}
         }
         const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}}});
