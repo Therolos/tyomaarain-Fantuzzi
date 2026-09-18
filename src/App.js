@@ -992,15 +992,16 @@ function AutoField({style, placeholder, value, onChange, suggestions, rows, show
           </button>
         )}
       </div>
-      {scanning&&<BarcodeScanner
-        suggestions={suggestions}
-        onScan={v=>{
-          const cleaned = v.trim();
-          onChange((value?value+" ":"")+cleaned+" ");
-          setScanning(false);
-        }}
-        onClose={()=>setScanning(false)}
-      />}
+      {scanning&&<BarcodeScanner onScan={v=>{
+  // Siivoa skannattu koodi
+  let cleaned = v;
+  // Donaldson: P164592-000-710 → P164592
+  if (/^P\d+-.+/.test(v)) cleaned = v.split("-")[0];
+  // Poista turhat suffixit ja whitespace
+  cleaned = cleaned.trim();
+  onChange((value?value+" ":"")+cleaned+" ");
+  setScanning(false);
+}} onClose={()=>setScanning(false)}/>}
       {show&&(
         <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",
           border:"1px solid #e5e7eb",borderRadius:6,zIndex:100,boxShadow:"0 4px 12px #00000015"}}>
@@ -1065,298 +1066,117 @@ function groupKoneet(koneet) {
 }
 
 
-// ── BarcodeScanner / OCR-osaskanneri ─────────────────────────────────────────
-function BarcodeScanner({onScan, onClose, suggestions=[]}) {
+// ── BarcodeScanner ────────────────────────────────────────────────────────────
+function BarcodeScanner({onScan, onClose}) {
   const videoRef = React.useRef(null);
-  const canvasRef = React.useRef(null);
   const [error, setError] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [ocrStatus, setOcrStatus] = useState("");
-  const [suggested, setSuggested] = useState([]);
-  const [lastText, setLastText] = useState("");
-
-  // Muutetaan OCR:n tavallisimmat O/0-tyyppiset sekoilut vertailukelpoisiksi.
-  const normalizePart = s => String(s||"")
-    .toUpperCase()
-    .replace(/\s+/g,"")
-    .replace(/[–—−]/g,"-")
-    .replace(/O/g,"0");
-
-  // Poimitaan tuotenumeroehdokkaat OCR-tekstistä.
-  const extractCandidates = raw => {
-    const txt = String(raw||"").toUpperCase();
-    const found = [];
-    const add = v => {
-      const n = normalizePart(v);
-      if (!n) return;
-      // Donaldson-tyylinen P164592-000-710 -> P164592
-      const base = n.match(/^(P\d{5,})(?:-.+)?$/);
-      const val = base ? base[1] : n;
-      if (
-        /^P\d{5,}$/.test(val) ||
-        /^\d{6,10}$/.test(val)
-      ) {
-        if (!found.includes(val)) found.push(val);
-      }
-    };
-
-    // P-alkuiset ovat etusijalla.
-    (txt.match(/P[\s\-]?\d[\d\sO]{4,12}(?:-\d[\d\sO-]+)?/g)||[]).forEach(add);
-    // Myös pelkät pitkät nimikenumerot.
-    (txt.match(/\b\d[\d\sO]{5,9}\b/g)||[]).forEach(add);
-    return found;
-  };
-
-  // Verrataan skannattua ehdokasta nykyiseen autocomplete-listaan.
-  const similarity = (a,b) => {
-    const x=normalizePart(a), y=normalizePart(b);
-    if (!x || !y) return 0;
-    if (x===y) return 1;
-    if (x.startsWith(y) || y.startsWith(x)) return Math.min(x.length,y.length)/Math.max(x.length,y.length);
-    const m=Math.max(x.length,y.length);
-    let same=0;
-    for(let i=0;i<Math.min(x.length,y.length);i++) if(x[i]===y[i]) same++;
-    return same/m;
-  };
-
-  const compareWithSuggestions = candidates => {
-    const cleanSuggestions = [...new Set((suggestions||[])
-      .map(s=>String(s||"").trim())
-      .filter(s=>/^P\d{5,}(?:-\d+)*$/i.test(s) || /^\d{6,10}$/.test(s))
-    )];
-
-    const matches = [];
-    candidates.forEach(c => {
-      cleanSuggestions.forEach(s => {
-        const score=similarity(c,s);
-        if(score>=0.72) matches.push({value:s,score,candidate:c});
-      });
-    });
-
-    matches.sort((a,b)=>b.score-a.score);
-    return matches.slice(0,5);
-  };
+  const [scanning, setScanning] = useState(true);
 
   React.useEffect(() => {
     let stream = null;
     let animFrame = null;
     let barcodeDetector = null;
-    let stopped = false;
 
     const start = async () => {
       try {
-        if (!navigator.mediaDevices?.getUserMedia) {
-          setError("Selain ei salli kameran käyttöä.");
+        // Check if BarcodeDetector is available
+        if (!("BarcodeDetector" in window)) {
+          setError("Selaimesi ei tue viivakoodiskannausta. Kokeile Chrome tai Edge.");
           return;
         }
-
-        // Viivakoodit yritetään lukea ensin natiivilla BarcodeDetectorilla.
-        if ("BarcodeDetector" in window) {
-          try {
-            barcodeDetector = new window.BarcodeDetector({
-              formats:["code_128","code_39","ean_13","ean_8","qr_code","data_matrix","upc_a","upc_e","itf"]
-            });
-          } catch(e) {
-            barcodeDetector = null;
-          }
-        }
-
-        stream = await navigator.mediaDevices.getUserMedia({
-          video:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}}
+        barcodeDetector = new window.BarcodeDetector({
+          formats: ["code_128","code_39","ean_13","ean_8","qr_code","data_matrix","upc_a","upc_e","itf"]
         });
-
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
         if (videoRef.current) {
-          videoRef.current.srcObject=stream;
+          videoRef.current.srcObject = stream;
           await videoRef.current.play();
-          if (barcodeDetector) detectBarcode();
-          else setOcrStatus("Viivakooditunnistus ei ole selaimessa käytössä. Voit silti lukea tekstin.");
+          detectLoop();
         }
       } catch(e) {
         setError("Kameran käyttö epäonnistui: " + e.message);
       }
     };
 
-    const detectBarcode = async () => {
-      if (stopped || !videoRef.current || !barcodeDetector) return;
+    const detectLoop = async () => {
+      if (!videoRef.current || !scanning) return;
       try {
-        const codes=await barcodeDetector.detect(videoRef.current);
-        if(codes.length>0){
-          const val=String(codes[0].rawValue||"").trim();
-          if(val){
-            stream?.getTracks().forEach(t=>t.stop());
-            stopped=true;
-            onScan(val);
-            return;
-          }
+        const codes = await barcodeDetector.detect(videoRef.current);
+        if (codes.length > 0) {
+          const val = codes[0].rawValue;
+          if (stream) stream.getTracks().forEach(t => t.stop());
+          onScan(val);
+          return;
         }
       } catch {}
-      animFrame=requestAnimationFrame(detectBarcode);
+      animFrame = requestAnimationFrame(detectLoop);
     };
 
     start();
     return () => {
-      stopped=true;
-      if(stream) stream.getTracks().forEach(t=>t.stop());
-      if(animFrame) cancelAnimationFrame(animFrame);
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      if (animFrame) cancelAnimationFrame(animFrame);
     };
   }, []);
-
-  const loadTesseract = async () => {
-    if (window.Tesseract) return window.Tesseract;
-    setOcrStatus("Ladataan tekstintunnistusta...");
-    await new Promise((resolve,reject)=>{
-      const existing=document.querySelector('script[data-tesseract="1"]');
-      if(existing){
-        existing.addEventListener("load",resolve,{once:true});
-        existing.addEventListener("error",reject,{once:true});
-        return;
-      }
-      const script=document.createElement("script");
-      script.src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
-      script.async=true;
-      script.dataset.tesseract="1";
-      script.onload=resolve;
-      script.onerror=reject;
-      document.head.appendChild(script);
-    });
-    if(!window.Tesseract) throw new Error("Tekstintunnistusta ei saatu ladattua.");
-    return window.Tesseract;
-  };
-
-  const captureAndOCR = async () => {
-    if(busy || !videoRef.current) return;
-    setBusy(true);
-    setSuggested([]);
-    setLastText("");
-    try {
-      const Tesseract=await loadTesseract();
-      const video=videoRef.current;
-      const canvas=canvasRef.current;
-      if(!canvas) throw new Error("Kamerakuvaa ei voitu käsitellä.");
-
-      const w=video.videoWidth||1280;
-      const h=video.videoHeight||720;
-      canvas.width=w;
-      canvas.height=h;
-
-      // Otetaan alkuperäinen kuva ja rajataan hieman keskialuetta, jossa
-      // käyttäjä pitää tuotenumeroa. Tesseract kokeilee myös käännettyä kuvaa.
-      const ctx=canvas.getContext("2d");
-      ctx.drawImage(video,0,0,w,h);
-
-      const rotations=[0,90,270,180];
-      let allText="";
-      for(const deg of rotations){
-        if(deg===0){
-          ctx.setTransform(1,0,0,1,0,0);
-          canvas.width=w; canvas.height=h;
-          ctx.drawImage(video,0,0,w,h);
-        }else{
-          canvas.width=h; canvas.height=w;
-          ctx.setTransform(1,0,0,1,0,0);
-          ctx.translate(canvas.width/2,canvas.height/2);
-          ctx.rotate(deg*Math.PI/180);
-          ctx.drawImage(video,-w/2,-h/2,w,h);
-          ctx.setTransform(1,0,0,1,0,0);
-        }
-
-        setOcrStatus(`Luetaan tekstiä... ${deg}°`);
-        const result=await Tesseract.recognize(canvas,"eng",{
-          logger:m=>{
-            if(m.status==="recognizing text" && typeof m.progress==="number"){
-              setOcrStatus(`Luetaan tekstiä... ${Math.round(m.progress*100)} %`);
-            }
-          }
-        });
-        allText += "\n" + (result.data?.text||"");
-      }
-
-      setLastText(allText.trim());
-      const candidates=extractCandidates(allText);
-      const matches=compareWithSuggestions(candidates);
-      setSuggested(matches);
-
-      if(matches.length>0){
-        setOcrStatus("Löytyi osanumeroon sopiva ehdotus.");
-      }else if(candidates.length>0){
-        setOcrStatus("Tuotenumero löytyi kuvasta, mutta sitä ei löytynyt nykyisestä osalistasta.");
-        // Näytetään ensimmäinen OCR-ehdokas hyväksyttäväksi.
-        setSuggested(candidates.slice(0,5).map(v=>({value:v,score:0,candidate:v})));
-      }else{
-        setOcrStatus("Tuotenumeroa ei tunnistettu. Kokeile lähempää tai suorista kuva.");
-      }
-    }catch(e){
-      console.error(e);
-      setOcrStatus("Tekstin lukeminen epäonnistui: " + e.message);
-    }finally{
-      setBusy(false);
-    }
-  };
-
-  const choose = value => {
-    if(streamRef.current) streamRef.current.getTracks().forEach(t=>t.stop());
-    onScan(value);
-  };
-
-  // Pidetään streamin viite myös ehdotusnapin käytettävissä.
-  const streamRef = React.useRef(null);
-  React.useEffect(() => {
-    if(videoRef.current?.srcObject) streamRef.current=videoRef.current.srcObject;
-  });
 
   return (
     <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#000",zIndex:1000,display:"flex",flexDirection:"column"}}>
       <div style={{padding:"16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style={{color:"#fff",fontFamily:"'Courier New',monospace",fontWeight:700}}>📷 SKANNAA OSA</div>
+        <div style={{color:"#fff",fontFamily:"'Courier New',monospace",fontWeight:700}}>📷 SKANNAA VIIVAKOODI</div>
         <button onClick={onClose} style={{background:"#333",border:"none",color:"#fff",borderRadius:6,padding:"8px 14px",fontSize:13,cursor:"pointer"}}>✕ Sulje</button>
       </div>
-
       {error ? (
         <div style={{color:"#ef4444",padding:24,textAlign:"center",fontFamily:"'Courier New',monospace",fontSize:13}}>{error}</div>
       ) : (
-        <div style={{flex:1,position:"relative",minHeight:0}}>
+        <div style={{flex:1,position:"relative"}}>
           <video ref={videoRef} style={{width:"100%",height:"100%",objectFit:"cover"}} playsInline muted/>
-          <canvas ref={canvasRef} style={{display:"none"}}/>
-          <div style={{position:"absolute",top:"50%",left:"8%",right:"8%",height:2,background:"#d97706",transform:"translateY(-50%)",boxShadow:"0 0 8px #d97706"}}/>
-          <div style={{position:"absolute",bottom:112,left:16,right:16,textAlign:"center",color:"#fff",fontSize:12,fontFamily:"'Courier New',monospace"}}>
-            Viivakoodi luetaan automaattisesti. Tekstin voi lukea painamalla nappia.
+          {/* Kohdistusviiva */}
+          <div style={{position:"absolute",top:"50%",left:"10%",right:"10%",height:2,background:"#d97706",transform:"translateY(-50%)",boxShadow:"0 0 8px #d97706"}}/>
+          <div style={{position:"absolute",bottom:40,left:0,right:0,textAlign:"center",color:"#fff",fontSize:13,fontFamily:"'Courier New',monospace"}}>
+            Kohdista viivakoodi oranssin viivan kohdalle
           </div>
-
-          {ocrStatus&&(
-            <div style={{position:"absolute",top:12,left:12,right:12,background:"#000b",color:"#fff",
-              borderRadius:8,padding:"10px 12px",fontSize:12,textAlign:"center"}}>
-              {ocrStatus}
-            </div>
-          )}
-
-          {suggested.length>0&&(
-            <div style={{position:"absolute",left:12,right:12,bottom:58,background:"#fff",borderRadius:10,padding:12,boxShadow:"0 4px 20px #0008"}}>
-              <div style={{fontWeight:700,fontSize:13,marginBottom:8}}>
-                {suggested.some(x=>x.score>0) ? "Ehdotettu osanumero" : "Tunnistettu osanumero"}
-              </div>
-              {suggested.map((s,i)=>(
-                <button key={i} onClick={()=>choose(s.value)}
-                  style={{display:"block",width:"100%",textAlign:"left",background:i===0?"#fffbeb":"#fff",
-                    border:"1px solid #e5e7eb",borderRadius:7,padding:"10px 12px",marginBottom:i<suggested.length-1?6:0,
-                    cursor:"pointer",fontSize:14,fontFamily:"monospace"}}>
-                  <strong>{s.value}</strong>
-                  {s.score>0&&<span style={{fontFamily:"inherit",fontSize:11,color:"#6b7280",marginLeft:8}}>
-                    {Math.round(s.score*100)} % osuma
-                  </span>}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <button type="button" disabled={busy} onClick={captureAndOCR}
-            style={{position:"absolute",bottom:10,left:"50%",transform:"translateX(-50%)",
-              background:"#d97706",border:"none",color:"#fff",borderRadius:8,padding:"10px 16px",
-              cursor:busy?"wait":"pointer",fontSize:13,fontWeight:700}}>
-            {busy ? "⏳ LUETAAN..." : "🔎 LUE TUOTENUMERO"}
-          </button>
         </div>
       )}
     </div>
   );
 }
 
+// ── Small components ──────────────────────────────────────────────────────────
+function Btn({children,onClick,primary,icon,full,disabled}){
+  return <button onClick={onClick} disabled={disabled} style={{
+    background:primary?"#d97706":"#f9fafb",color:primary?"#fff":"#6b7280",
+    border:primary?"none":"1px solid #e5e7eb",borderRadius:6,
+    padding:icon?"6px 10px":full?"14px":"7px 14px",
+    fontSize:full?14:12,fontWeight:700,fontFamily:"'Courier New',monospace",
+    letterSpacing:0.5,cursor:disabled?"not-allowed":"pointer",
+    opacity:disabled?0.4:1,width:full?"100%":"auto",
+  }}>{children}</button>;
+}
+function Label({children}){return <div style={{fontSize:10,color:"#9ca3af",letterSpacing:1.5,fontFamily:"monospace",marginBottom:4,marginTop:14,textTransform:"uppercase"}}>{children}</div>;}
+function Hint({children,red}){return <div style={{fontSize:10,color:red?"#dc2626":"#9ca3af",marginBottom:6}}>{children}</div>;}
+function Sec({label,children}){return <div style={{marginBottom:14}}><div style={R.lbl}>{label}</div><div style={{fontSize:14,color:"#374151",lineHeight:1.5,marginTop:4}}>{children}</div></div>;}
+
+// ── Styles ────────────────────────────────────────────────────────────────────
+const R={
+  root:   {background:"#f3f4f6",minHeight:"100vh",fontFamily:"'Courier New',monospace",color:"#1f2937",maxWidth:480,margin:"0 auto"},
+  header: {background:"#fff",borderBottom:"3px solid #d97706",padding:"14px 16px 12px",position:"sticky",top:0,zIndex:10,boxShadow:"0 2px 6px #00000010"},
+  htop:   {display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10},
+  logo:   {fontSize:18,fontWeight:700,color:"#d97706",letterSpacing:2},
+  sub:    {fontSize:12,color:"#9ca3af",letterSpacing:1,marginTop:2},
+  body:   {padding:16},
+  chip:   {border:"1px solid",borderRadius:6,padding:"4px 10px",display:"flex",alignItems:"center",gap:4},
+  csvBtn: {background:"#f9fafb",border:"1px solid #e5e7eb",color:"#9ca3af",borderRadius:6,padding:"4px 10px",fontSize:10,fontFamily:"'Courier New',monospace",cursor:"pointer"},
+  search: {width:"100%",background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,color:"#1f2937",padding:"10px 12px",fontSize:15,fontFamily:"'Courier New',monospace",marginBottom:14,boxSizing:"border-box",boxShadow:"0 1px 3px #00000008"},
+  card:   {background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:16,marginBottom:10,boxShadow:"0 1px 4px #00000008"},
+  badge:  {fontSize:11,fontWeight:700,padding:"4px 10px",borderRadius:10,letterSpacing:0.5,whiteSpace:"nowrap"},
+  tbox:   {background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 14px",marginBottom:4},
+  lbl:    {fontSize:11,color:"#9ca3af",letterSpacing:2,textTransform:"uppercase",marginBottom:4},
+  input:  {width:"100%",background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:6,color:"#1f2937",padding:"12px 14px",fontSize:15,fontFamily:"'Courier New',monospace",boxSizing:"border-box",outline:"none",marginBottom:6},
+  stBtn:  {background:"transparent",border:"1px solid",borderRadius:6,padding:"8px 14px",fontSize:13,fontWeight:700,fontFamily:"'Courier New',monospace",cursor:"pointer"},
+  pdfBtn: {width:"100%",background:"#fff",border:"1px solid #d97706",color:"#d97706",padding:"10px",borderRadius:6,fontSize:12,fontFamily:"'Courier New',monospace",cursor:"pointer",fontWeight:700,marginBottom:8},
+  delBtn: {width:"100%",background:"transparent",border:"1px solid #e5e7eb",color:"#9ca3af",padding:"10px",borderRadius:6,fontSize:12,fontFamily:"'Courier New',monospace",cursor:"pointer"},
+  xBtn:   {background:"transparent",border:"1px solid #fecaca",color:"#dc2626",borderRadius:6,padding:"8px 10px",cursor:"pointer",fontSize:12,flexShrink:0},
+  addBtn: {background:"#d97706",color:"#fff",border:"none",borderRadius:6,padding:"8px 12px",cursor:"pointer",fontSize:14,fontWeight:700,flexShrink:0},
+};
