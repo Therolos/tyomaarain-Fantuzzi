@@ -948,10 +948,35 @@ function PaivanTunnit({tekijat, pvm, woList}) {
 }
 
 // ── Autocomplete ──────────────────────────────────────────────────────────────
+function normalizePartCode(s) {
+  return String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function partCodeSimilarity(a, b) {
+  const x = normalizePartCode(a), y = normalizePartCode(b);
+  if (!x || !y) return 0;
+  if (x === y) return 1;
+  if (x.includes(y) || y.includes(x)) return 0.92;
+  // Small OCR mistakes: allow one differing character for typical part numbers.
+  if (x.length === y.length) {
+    let diff = 0;
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i] && ++diff > 1) return 0;
+    return 0.86;
+  }
+  return 0;
+}
+
+function appendScannedValue(current, scanned) {
+  const clean = String(scanned || "").trim();
+  if (!clean) return current;
+  return (current ? current.trimEnd() + " " : "") + clean + " ";
+}
+
 function AutoField({style, placeholder, value, onChange, suggestions, rows, showScan}) {
   const [show, setShow] = useState(false);
   const [filtered, setFiltered] = useState([]);
   const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState(null);
 
   const handleChange = e => {
     const val = e.target.value;
@@ -959,189 +984,168 @@ function AutoField({style, placeholder, value, onChange, suggestions, rows, show
     const lastWord = val.split(/\s+/).pop();
     if (lastWord.length >= 2) {
       const lower = lastWord.toLowerCase();
-      const matches = [...new Set(suggestions.filter(s =>
+      const matches = [...new Set((suggestions || []).filter(s =>
         s.toLowerCase().startsWith(lower) && s.toLowerCase() !== lower
       ))].slice(0, 6);
       setFiltered(matches);
       setShow(matches.length > 0);
-    } else {
-      setShow(false);
-    }
+    } else setShow(false);
   };
 
   const select = s => {
-    // Lisää sana nykyisen tekstin loppuun välilyönnillä erotettuna
     const current = value.trim();
-    const words = current.split(/\s+/);
-    words[words.length-1] = s; // korvaa viimeinen sana (jota kirjoitetaan)
+    const words = current ? current.split(/\s+/) : [];
+    if (words.length) words[words.length - 1] = s;
+    else words.push(s);
     onChange(words.join(" ") + " ");
     setShow(false);
+  };
+
+  const handleScan = scanned => {
+    const raw = String(scanned || "").trim();
+    const candidates = raw.split(/[\n,;|]+/).map(x => x.trim()).filter(Boolean);
+    const usable = candidates.find(x => /^P\s*[0-9OILSB]{5,12}$/i.test(x.replace(/[ -]/g, ""))) || candidates[0] || "";
+    if (!usable) { setScanResult({value:"", match:null}); return; }
+
+    const normalized = normalizePartCode(usable).replace(/O/g,"0").replace(/I/g,"1").replace(/L/g,"1").replace(/S/g,"5").replace(/B/g,"8");
+    let best = null, bestScore = 0;
+    (suggestions || []).forEach(s => {
+      const score = Math.max(partCodeSimilarity(usable, s), partCodeSimilarity(normalized, s));
+      if (score > bestScore) { bestScore = score; best = s; }
+    });
+    setScanResult({value: usable, match: bestScore >= 0.86 ? best : null});
+  };
+
+  const acceptScan = textValue => {
+    onChange(appendScannedValue(value, textValue));
+    setScanResult(null);
+    setScanning(false);
   };
 
   if (rows) return (
     <div style={{position:"relative"}}>
       <div style={{position:"relative"}}>
-        <textarea style={{...style,paddingRight: showScan?"44px":style.paddingRight}} placeholder={placeholder} value={value}
+        <textarea style={{...style,paddingRight:showScan?"44px":style.paddingRight}} placeholder={placeholder} value={value}
           onChange={handleChange} onBlur={()=>setTimeout(()=>setShow(false),150)}
           onFocus={()=>value.length>=2&&handleChange({target:{value}})}/>
-        {showScan&&(
-          <button type="button" onClick={()=>setScanning(true)}
-            style={{position:"absolute",right:8,bottom:8,background:"#d97706",border:"none",
-              borderRadius:6,padding:"6px 8px",cursor:"pointer",fontSize:16}}>
-            📷
-          </button>
-        )}
+        {showScan && <button type="button" onClick={()=>{setScanResult(null);setScanning(true);}}
+          style={{position:"absolute",right:8,bottom:8,background:"#d97706",border:"none",borderRadius:6,padding:"6px 8px",cursor:"pointer",fontSize:16}}>📷</button>}
       </div>
-      {scanning&&<BarcodeScanner onScan={v=>{
-  // Siivoa skannattu koodi
-  let cleaned = v;
-  // Donaldson: P164592-000-710 → P164592
-  if (/^P\d+-.+/.test(v)) cleaned = v.split("-")[0];
-  // Poista turhat suffixit ja whitespace
-  cleaned = cleaned.trim();
-  onChange((value?value+" ":"")+cleaned+" ");
-  setScanning(false);
-}} onClose={()=>setScanning(false)}/>}
-      {show&&(
-        <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",
-          border:"1px solid #e5e7eb",borderRadius:6,zIndex:100,boxShadow:"0 4px 12px #00000015"}}>
-          {filtered.map((s,i)=>(
-            <div key={i} onClick={()=>select(s)}
-              style={{padding:"10px 14px",fontSize:13,color:"#374151",cursor:"pointer",
-                borderBottom:i<filtered.length-1?"1px solid #f3f4f6":"none"}}>
-              {s}
-            </div>
-          ))}
+      {scanResult && (
+        <div style={{marginTop:6,padding:10,border:"1px solid #fbbf24",borderRadius:6,background:"#fffbeb",fontSize:12}}>
+          <div style={{fontWeight:700}}>Skannattu: {scanResult.value || "ei tunnistettua numeroa"}</div>
+          {scanResult.match ? <>
+            <div style={{marginTop:4,color:"#374151"}}>Mahdollinen vastaava osa:</div>
+            <button type="button" onClick={()=>acceptScan(scanResult.match)} style={{marginTop:6,width:"100%",textAlign:"left",padding:"8px 10px",border:"1px solid #d97706",borderRadius:5,background:"#fff",cursor:"pointer",fontWeight:700}}>
+              ✓ {scanResult.match}
+            </button>
+          </> : <button type="button" onClick={()=>acceptScan(scanResult.value)} style={{marginTop:6,padding:"7px 10px",border:"none",borderRadius:5,background:"#d97706",color:"#fff",cursor:"pointer"}}>Lisää skannattu numero</button>}
+          <button type="button" onClick={()=>setScanResult(null)} style={{marginLeft:8,padding:"7px 10px",border:"1px solid #ddd",borderRadius:5,background:"#fff",cursor:"pointer"}}>Peruuta</button>
         </div>
       )}
+      {scanning && <BarcodeScanner onScan={handleScan} onClose={()=>setScanning(false)}/>} 
+      {show && <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #e5e7eb",borderRadius:6,zIndex:100,boxShadow:"0 4px 12px #00000015"}}>
+        {filtered.map((s,i)=><div key={i} onClick={()=>select(s)} style={{padding:"10px 14px",fontSize:13,color:"#374151",cursor:"pointer",borderBottom:i<filtered.length-1?"1px solid #f3f4f6":"none"}}>{s}</div>)}
+      </div>}
     </div>
   );
 
-  return (
-    <div style={{position:"relative"}}>
-      <input style={style} placeholder={placeholder} value={value}
-        onChange={handleChange} onBlur={()=>setTimeout(()=>setShow(false),150)}
-        onFocus={()=>value.length>=2&&handleChange({target:{value}})}/>
-      {show&&(
-        <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",
-          border:"1px solid #e5e7eb",borderRadius:6,zIndex:100,boxShadow:"0 4px 12px #00000015"}}>
-          {filtered.map((s,i)=>(
-            <div key={i} onClick={()=>select(s)}
-              style={{padding:"10px 14px",fontSize:13,color:"#374151",cursor:"pointer",
-                borderBottom:i<filtered.length-1?"1px solid #f3f4f6":"none"}}>
-              {s}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return <textarea style={style} rows={rows} placeholder={placeholder} value={value} onChange={handleChange}/>
 }
 
-
-// ── Koneryhmittely ────────────────────────────────────────────────────────────
-function getKoneRyhma(nimi) {
-  if (!nimi) return "Muut";
-  const osat = nimi.trim().split(/\s+/);
-  const viim = osat[osat.length - 1];
-  // Jos viimeinen sana on lyhyt tunnus (iso alkukirjain tai pelkkiä isoja), käytetään sitä
-  if (/^[A-ZÅÄÖ]/.test(viim) && viim.length <= 10) return viim;
-  return "Muut";
-}
-
-function groupKoneet(koneet) {
-  const groups = {};
-  koneet.forEach(k => {
-    const r = getKoneRyhma(k);
-    if (!groups[r]) groups[r] = [];
-    groups[r].push(k);
-  });
-  // Järjestä ryhmät aakkosjärjestykseen, Muut viimeiseksi
-  const sorted = Object.keys(groups).sort((a,b) => {
-    if (a === "Muut") return 1;
-    if (b === "Muut") return -1;
-    return a.localeCompare(b);
-  });
-  return sorted.map(r => ({ryhma: r, koneet: groups[r]}));
-}
-
-
-// ── BarcodeScanner ────────────────────────────────────────────────────────────
 function BarcodeScanner({onScan, onClose}) {
   const videoRef = React.useRef(null);
+  const canvasRef = React.useRef(null);
+  const streamRef = React.useRef(null);
   const [error, setError] = useState(null);
-  const [scanning, setScanning] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState("barcode");
 
-  React.useEffect(() => {
-    let stream = null;
-    let animFrame = null;
-    let barcodeDetector = null;
-
+  useEffect(() => {
+    let stopped = false;
+    let raf = null;
+    let detector = null;
     const start = async () => {
       try {
-        // Check if BarcodeDetector is available
-        if (!("BarcodeDetector" in window)) {
-          setError("Selaimesi ei tue viivakoodiskannausta. Kokeile Chrome tai Edge.");
-          return;
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error("Kameraa ei voi käyttää tässä selaimessa.");
+        if ("BarcodeDetector" in window) {
+          try { detector = new window.BarcodeDetector({formats:["code_128","code_39","ean_13","ean_8","qr_code","data_matrix","upc_a","upc_e","itf"]}); } catch {}
         }
-        barcodeDetector = new window.BarcodeDetector({
-          formats: ["code_128","code_39","ean_13","ean_8","qr_code","data_matrix","upc_a","upc_e","itf"]
-        });
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
-        });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-          detectLoop();
-        }
-      } catch(e) {
-        setError("Kameran käyttö epäonnistui: " + e.message);
-      }
+        const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}}});
+        streamRef.current = stream;
+        if (!stopped && videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+        const loop = async () => {
+          if (stopped || !detector || !videoRef.current) return;
+          try {
+            const codes = await detector.detect(videoRef.current);
+            if (codes?.length) { stopCamera(); onScan(codes[0].rawValue || ""); return; }
+          } catch {}
+          raf = requestAnimationFrame(loop);
+        };
+        if (detector) loop();
+      } catch(e) { setError(e.message || "Kameran käyttö epäonnistui."); }
     };
-
-    const detectLoop = async () => {
-      if (!videoRef.current || !scanning) return;
-      try {
-        const codes = await barcodeDetector.detect(videoRef.current);
-        if (codes.length > 0) {
-          const val = codes[0].rawValue;
-          if (stream) stream.getTracks().forEach(t => t.stop());
-          onScan(val);
-          return;
-        }
-      } catch {}
-      animFrame = requestAnimationFrame(detectLoop);
-    };
-
     start();
-    return () => {
-      if (stream) stream.getTracks().forEach(t => t.stop());
-      if (animFrame) cancelAnimationFrame(animFrame);
-    };
+    return () => { stopped=true; if(raf) cancelAnimationFrame(raf); stopCamera(); };
   }, []);
 
-  return (
-    <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#000",zIndex:1000,display:"flex",flexDirection:"column"}}>
-      <div style={{padding:"16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style={{color:"#fff",fontFamily:"'Courier New',monospace",fontWeight:700}}>📷 SKANNAA VIIVAKOODI</div>
-        <button onClick={onClose} style={{background:"#333",border:"none",color:"#fff",borderRadius:6,padding:"8px 14px",fontSize:13,cursor:"pointer"}}>✕ Sulje</button>
-      </div>
-      {error ? (
-        <div style={{color:"#ef4444",padding:24,textAlign:"center",fontFamily:"'Courier New',monospace",fontSize:13}}>{error}</div>
-      ) : (
-        <div style={{flex:1,position:"relative"}}>
-          <video ref={videoRef} style={{width:"100%",height:"100%",objectFit:"cover"}} playsInline muted/>
-          {/* Kohdistusviiva */}
-          <div style={{position:"absolute",top:"50%",left:"10%",right:"10%",height:2,background:"#d97706",transform:"translateY(-50%)",boxShadow:"0 0 8px #d97706"}}/>
-          <div style={{position:"absolute",bottom:40,left:0,right:0,textAlign:"center",color:"#fff",fontSize:13,fontFamily:"'Courier New',monospace"}}>
-            Kohdista viivakoodi oranssin viivan kohdalle
-          </div>
-        </div>
-      )}
+  const stopCamera = () => { if(streamRef.current){streamRef.current.getTracks().forEach(t=>t.stop());streamRef.current=null;} };
+
+  const loadTesseract = async () => {
+    if (window.Tesseract) return window.Tesseract;
+    await new Promise((resolve,reject)=>{
+      const existing = document.getElementById("tesseract-js");
+      if(existing){ existing.addEventListener("load",resolve,{once:true}); existing.addEventListener("error",reject,{once:true}); return; }
+      const script=document.createElement("script"); script.id="tesseract-js"; script.src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+      script.onload=resolve; script.onerror=()=>reject(new Error("OCR-kirjaston lataus epäonnistui.")); document.head.appendChild(script);
+    });
+    return window.Tesseract;
+  };
+
+  const captureOCR = async () => {
+    if(busy || !videoRef.current || !canvasRef.current) return;
+    setBusy(true); setError(null);
+    try {
+      const video=videoRef.current, canvas=canvasRef.current;
+      canvas.width=video.videoWidth||1280; canvas.height=video.videoHeight||720;
+      const ctx=canvas.getContext("2d"); ctx.drawImage(video,0,0,canvas.width,canvas.height);
+      const Tesseract=await loadTesseract();
+      const result=await Tesseract.recognize(canvas,"eng",{logger:()=>{}});
+      const text=result?.data?.text||"";
+      const pMatch=text.match(/P\s*[0-9OILSB]{5,12}/i);
+      const numMatch=text.match(/\b\d{7,12}\b/);
+      const found=(pMatch&&pMatch[0])||(numMatch&&numMatch[0]);
+      if(found) { stopCamera(); onScan(found.replace(/\s+/g,"")); }
+      else setError("Numeroa ei löytynyt. Kohdista tarra paremmin ja kokeile uudelleen.");
+    } catch(e) { setError(e.message||"OCR-skannaus epäonnistui."); }
+    finally { setBusy(false); }
+  };
+
+  const close=()=>{stopCamera();onClose();};
+  return <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#000",zIndex:1000,display:"flex",flexDirection:"column"}}>
+    <div style={{padding:"16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{color:"#fff",fontFamily:"'Courier New',monospace",fontWeight:700}}>📷 OSASKANNERI</div>
+      <button onClick={close} style={{background:"#333",border:"none",color:"#fff",borderRadius:6,padding:"8px 14px",fontSize:13,cursor:"pointer"}}>✕ Sulje</button>
     </div>
-  );
+    <div style={{flex:1,position:"relative",minHeight:0}}>
+      <video ref={videoRef} style={{width:"100%",height:"100%",objectFit:"cover"}} playsInline muted/>
+      <canvas ref={canvasRef} style={{display:"none"}}/>
+      <div style={{position:"absolute",top:"45%",left:"8%",right:"8%",height:2,background:"#d97706",boxShadow:"0 0 8px #d97706"}}/>
+      <div style={{position:"absolute",bottom:90,left:16,right:16,textAlign:"center",color:"#fff",fontSize:13,fontFamily:"'Courier New',monospace"}}>
+        {mode==="barcode" && !detectorHint() ? "Viivakoodituki puuttuu — käytä OCR-kuvausta" : mode==="barcode" ? "Kohdista viivakoodi viivalle" : "Kohdista osanumero selkeästi kuvaan"}
+      </div>
+    </div>
+    {error && <div style={{padding:"8px 16px",color:"#fca5a5",background:"#111",textAlign:"center",fontSize:12}}>{error}</div>}
+    <div style={{padding:12,display:"flex",gap:8,background:"#111"}}>
+      <button onClick={()=>setMode("barcode")} style={{flex:1,padding:10,borderRadius:6,border:"1px solid #555",background:mode==="barcode"?"#d97706":"#222",color:"#fff"}}>Viivakoodi</button>
+      <button onClick={()=>setMode("ocr")} style={{flex:1,padding:10,borderRadius:6,border:"1px solid #555",background:mode==="ocr"?"#d97706":"#222",color:"#fff"}}>OCR / numero</button>
+      {mode==="ocr" && <button disabled={busy} onClick={captureOCR} style={{flex:1,padding:10,borderRadius:6,border:"none",background:"#16a34a",color:"#fff",fontWeight:700}}>{busy?"⏳":"📸 Lue numero"}</button>}
+    </div>
+  </div>;
+
+  function detectorHint(){ return "BarcodeDetector" in window; }
 }
+
 
 // ── Small components ──────────────────────────────────────────────────────────
 function Btn({children,onClick,primary,icon,full,disabled}){
