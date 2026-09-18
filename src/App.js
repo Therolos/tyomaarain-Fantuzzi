@@ -1013,6 +1013,9 @@ function AutoField({style, placeholder, value, onChange, suggestions, rows, show
       const score = Math.max(partCodeSimilarity(usable, s), partCodeSimilarity(normalized, s));
       if (score > bestScore) { bestScore = score; best = s; }
     });
+    // Kun OCR/viivakoodi tuottaa käyttökelpoisen ehdokkaan, suljetaan kamera heti.
+    // Tulos jää lomakkeelle tarkistettavaksi ennen hyväksymistä.
+    setScanning(false);
     setScanResult({value: usable, match: bestScore >= 0.86 ? best : null});
   };
 
@@ -1106,17 +1109,50 @@ function BarcodeScanner({onScan, onClose}) {
     if(busy || !videoRef.current || !canvasRef.current) return;
     setBusy(true); setError(null);
     try {
-      const video=videoRef.current, canvas=canvasRef.current;
-      canvas.width=video.videoWidth||1280; canvas.height=video.videoHeight||720;
-      const ctx=canvas.getContext("2d"); ctx.drawImage(video,0,0,canvas.width,canvas.height);
+      const video=videoRef.current;
+      const sourceW=video.videoWidth||1280, sourceH=video.videoHeight||720;
       const Tesseract=await loadTesseract();
-      const result=await Tesseract.recognize(canvas,"eng",{logger:()=>{}});
-      const text=result?.data?.text||"";
-      const pMatch=text.match(/P\s*[0-9OILSB]{5,12}/i);
-      const numMatch=text.match(/\b\d{7,12}\b/);
-      const found=(pMatch&&pMatch[0])||(numMatch&&numMatch[0]);
-      if(found) { stopCamera(); onScan(found.replace(/\s+/g,"")); }
-      else setError("Numeroa ei löytynyt. Kohdista tarra paremmin ja kokeile uudelleen.");
+
+      // Luetaan ensin koko kuva ja sen jälkeen keskeltä rajattu, suurennettu alue.
+      // Rajaus + binarisointi auttaa erityisesti valokuvatuissa tarroissa.
+      const attempts = [];
+      const addAttempt = (sx,sy,sw,sh,scale=2) => {
+        const c=document.createElement("canvas");
+        c.width=Math.max(1,Math.round(sw*scale));
+        c.height=Math.max(1,Math.round(sh*scale));
+        const cx=c.getContext("2d");
+        cx.imageSmoothingEnabled=false;
+        cx.drawImage(video,sx,sy,sw,sh,0,0,c.width,c.height);
+        const img=cx.getImageData(0,0,c.width,c.height);
+        for(let i=0;i<img.data.length;i+=4){
+          const g=0.299*img.data[i]+0.587*img.data[i+1]+0.114*img.data[i+2];
+          const v=g>150?255:0;
+          img.data[i]=img.data[i+1]=img.data[i+2]=v;
+        }
+        cx.putImageData(img,0,0);
+        attempts.push(c);
+      };
+
+      addAttempt(0,0,sourceW,sourceH,1.5);
+      addAttempt(sourceW*0.05,sourceH*0.30,sourceW*0.90,sourceH*0.40,2.5);
+      addAttempt(sourceW*0.05,sourceH*0.38,sourceW*0.90,sourceH*0.24,3);
+
+      let found="";
+      for(const image of attempts){
+        const result=await Tesseract.recognize(image,"eng",{
+          logger:()=>{},
+          tessedit_pageseg_mode:"7",
+          tessedit_char_whitelist:"P0123456789OILSB"
+        });
+        const text=result?.data?.text||"";
+        const pMatch=text.match(/P\s*[0-9OILSB]{5,12}/i);
+        const numMatch=text.match(/\b\d{7,12}\b/);
+        const candidate=(pMatch&&pMatch[0])||(numMatch&&numMatch[0]);
+        if(candidate){ found=candidate.replace(/\s+/g,""); break; }
+      }
+
+      if(found) { stopCamera(); onScan(found); }
+      else setError("Numeroa ei löytynyt. Kohdista osanumero selkeästi viivalle ja kokeile uudelleen.");
     } catch(e) { setError(e.message||"OCR-skannaus epäonnistui."); }
     finally { setBusy(false); }
   };
